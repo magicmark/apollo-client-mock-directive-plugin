@@ -29,8 +29,12 @@ export class MockLink extends ApolloLink {
     operation: Operation,
     forward?: NextLink
   ): Observable<FetchResult> | null {
-    const operationName =
-      operation.operationName || this.getOperationName(operation.query);
+    const operationName = operation.operationName;
+
+    if (!operationName) {
+      throw new Error("Operation name is required when using MockLink.");
+    }
+
     const mocks = this.parseMocks(operation.query, operationName);
 
     if (mocks.operationVariant) {
@@ -73,16 +77,6 @@ export class MockLink extends ApolloLink {
 
       return () => subscription.unsubscribe();
     });
-  }
-
-  private getOperationName(query: DocumentNode): string {
-    for (const definition of query.definitions) {
-      if (definition.kind === Kind.OPERATION_DEFINITION) {
-        return definition.name?.value || "UnnamedOperation";
-      }
-    }
-
-    return "UnnamedOperation";
   }
 
   private parseMocks(query: DocumentNode, targetOperationName: string): ParsedMocks {
