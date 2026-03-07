@@ -182,14 +182,15 @@ export class MockLink extends ApolloLink {
    */
   private stripMockedFields(
     query: DocumentNode,
-    fieldMocks: MockDirectiveInfo[]
+    _fieldMocks: MockDirectiveInfo[]
   ): DocumentNode {
-    const mockedFieldNames = new Set(fieldMocks.map(m => m.fieldName));
-
     const transformedQuery = visit(query, {
       Field(node) {
         // Remove fields that have @mock directives
-        if (mockedFieldNames.has(node.name.value)) {
+        const hasMockDirective = node.directives?.some(
+          (d) => d.name.value === "mock"
+        );
+        if (hasMockDirective) {
           return null;
         }
       },
