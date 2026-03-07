@@ -92,6 +92,7 @@ export class MockLink extends ApolloLink {
             !node.name || node.name.value === targetOperationName;
 
           if (!isTargetOperation) {
+            // Ignore other operations in multi-operation documents.
             return false;
           }
 
@@ -115,6 +116,7 @@ export class MockLink extends ApolloLink {
             return;
           }
 
+          // Mocked field values are merged by response key (alias when present).
           const responseFieldName = node.alias?.value || node.name.value;
           pathStack.push(responseFieldName);
 
@@ -261,6 +263,7 @@ export class MockLink extends ApolloLink {
         continue;
       }
 
+      // Materialize missing/non-object branches so nested mock paths can be set.
       const next: Record<string, unknown> = {};
       current[segment] = next;
       current = next;
