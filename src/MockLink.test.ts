@@ -147,4 +147,23 @@ describe("MockLink", () => {
 
     expect(state.serverCalls).toBe(0);
   });
+
+  test("throws when the operation is unnamed", async () => {
+    const { client, state } = createClient({});
+
+    await expect(
+      client.query({
+        query: gql`
+          query {
+            countries {
+              code
+            }
+          }
+        `,
+        fetchPolicy: "no-cache",
+      })
+    ).rejects.toThrow("Operation name is required when using MockLink.");
+
+    expect(state.serverCalls).toBe(0);
+  });
 });
