@@ -2,6 +2,16 @@ import { ApolloClient, ApolloLink, InMemoryCache, Observable, from, gql } from "
 import { describe, expect, test } from "vitest";
 import { MockLink } from "./MockLink";
 
+function createServerLink(result: unknown, onCall?: () => void): ApolloLink {
+  return new ApolloLink(() => {
+    onCall?.();
+    return new Observable((observer) => {
+      observer.next(result as never);
+      observer.complete();
+    });
+  });
+}
+
 describe("MockLink", () => {
   test("operation-level @mock returns the mocked result without hitting server", async () => {
     const registry = {
@@ -19,11 +29,8 @@ describe("MockLink", () => {
     };
 
     let serverCalls = 0;
-    const serverLink = new ApolloLink(() => {
+    const serverLink = createServerLink({}, () => {
       serverCalls += 1;
-      return new Observable((observer) => {
-        observer.error(new Error("server should not be called"));
-      });
     });
 
     const client = new ApolloClient({
@@ -62,18 +69,13 @@ describe("MockLink", () => {
       },
     };
 
-    const serverLink = new ApolloLink(() => {
-      return new Observable((observer) => {
-        observer.next({
-          data: {
-            country: {
-              code: "US",
-              name: "United States",
-            },
-          },
-        });
-        observer.complete();
-      });
+    const serverLink = createServerLink({
+      data: {
+        country: {
+          code: "US",
+          name: "United States",
+        },
+      },
     });
 
     const client = new ApolloClient({
@@ -113,18 +115,13 @@ describe("MockLink", () => {
       },
     };
 
-    const serverLink = new ApolloLink(() => {
-      return new Observable((observer) => {
-        observer.next({
-          data: {
-            country: {
-              code: "US",
-              name: "United States",
-            },
-          },
-        });
-        observer.complete();
-      });
+    const serverLink = createServerLink({
+      data: {
+        country: {
+          code: "US",
+          name: "United States",
+        },
+      },
     });
 
     const client = new ApolloClient({
@@ -170,18 +167,13 @@ describe("MockLink", () => {
       },
     };
 
-    const serverLink = new ApolloLink(() => {
-      return new Observable((observer) => {
-        observer.next({
-          data: {
-            country: {
-              code: "US",
-              name: "United States",
-            },
-          },
-        });
-        observer.complete();
-      });
+    const serverLink = createServerLink({
+      data: {
+        country: {
+          code: "US",
+          name: "United States",
+        },
+      },
     });
 
     const client = new ApolloClient({
