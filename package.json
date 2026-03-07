@@ -26,6 +26,7 @@
     "dev": "tsup --watch",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "prepare": "tsup",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
