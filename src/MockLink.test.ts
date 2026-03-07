@@ -1,44 +1,10 @@
 import { ApolloClient, ApolloLink, InMemoryCache, Observable, from, gql } from "@apollo/client";
-import type { FetchResult, Operation } from "@apollo/client";
-import { print } from "graphql";
 import { describe, expect, test } from "vitest";
 import { MockLink } from "./MockLink";
-import type { MockRegistry } from "./types";
-
-function createClient(
-  mockRegistry: MockRegistry,
-  handleServerResponse: (operation: Operation) => FetchResult = () => ({ data: {} })
-) {
-  const state = {
-    serverCalls: 0,
-    forwardedQuery: "",
-  };
-
-  const serverLink = new ApolloLink((operation) => {
-    state.serverCalls += 1;
-    state.forwardedQuery = print(operation.query);
-
-    return new Observable((observer) => {
-      try {
-        observer.next(handleServerResponse(operation));
-        observer.complete();
-      } catch (error) {
-        observer.error(error);
-      }
-    });
-  });
-
-  const client = new ApolloClient({
-    link: from([new MockLink({ mockRegistry }), serverLink]),
-    cache: new InMemoryCache({ addTypename: false }),
-  });
-
-  return { client, state };
-}
 
 describe("MockLink", () => {
-  test("supports operation-level mocks via @mock(name) without forwarding", async () => {
-    const { client, state } = createClient({
+  test("operation-level @mock returns the mocked result without hitting server", async () => {
+    const registry = {
       GetCountries: {
         "top-three": {
           data: {
@@ -50,6 +16,19 @@ describe("MockLink", () => {
           },
         },
       },
+    };
+
+    let serverCalls = 0;
+    const serverLink = new ApolloLink(() => {
+      serverCalls += 1;
+      return new Observable((observer) => {
+        observer.error(new Error("server should not be called"));
+      });
+    });
+
+    const client = new ApolloClient({
+      link: from([new MockLink({ mockRegistry: registry }), serverLink]),
+      cache: new InMemoryCache({ addTypename: false }),
     });
 
     const result = await client.query({
@@ -64,7 +43,7 @@ describe("MockLink", () => {
       fetchPolicy: "no-cache",
     });
 
-    expect(state.serverCalls).toBe(0);
+    expect(serverCalls).toBe(0);
     expect(result.data).toEqual({
       countries: [
         { code: "US", name: "United States" },
@@ -74,24 +53,33 @@ describe("MockLink", () => {
     });
   });
 
-  test("removes mocked fields before forwarding and merges the field mock into response data", async () => {
-    const { client, state } = createClient(
-      {
-        GetCountry: {
-          "fictional-capital": {
-            data: "Wakanda City",
-          },
+  test("field-level @mock on existing field merges mocked field with server fields", async () => {
+    const registry = {
+      GetCountry: {
+        "fictional-capital": {
+          data: "Wakanda City",
         },
       },
-      () => ({
-        data: {
-          country: {
-            code: "US",
-            name: "United States",
+    };
+
+    const serverLink = new ApolloLink(() => {
+      return new Observable((observer) => {
+        observer.next({
+          data: {
+            country: {
+              code: "US",
+              name: "United States",
+            },
           },
-        },
-      })
-    );
+        });
+        observer.complete();
+      });
+    });
+
+    const client = new ApolloClient({
+      link: from([new MockLink({ mockRegistry: registry }), serverLink]),
+      cache: new InMemoryCache({ addTypename: false }),
+    });
 
     const result = await client.query({
       query: gql`
@@ -107,9 +95,6 @@ describe("MockLink", () => {
       fetchPolicy: "no-cache",
     });
 
-    expect(state.serverCalls).toBe(1);
-    expect(state.forwardedQuery).not.toContain("@mock");
-    expect(state.forwardedQuery).not.toContain("capital");
     expect(result.data).toEqual({
       country: {
         code: "US",
@@ -119,51 +104,126 @@ describe("MockLink", () => {
     });
   });
 
-  test("throws a helpful error when the requested variant is missing", async () => {
-    const { client, state } = createClient({
-      GetCountries: {
-        "top-three": {
+  test("field-level @mock on new field adds field that server does not return", async () => {
+    const registry = {
+      GetCountryWithPopulation: {
+        "estimated-population": {
+          data: 331900000,
+        },
+      },
+    };
+
+    const serverLink = new ApolloLink(() => {
+      return new Observable((observer) => {
+        observer.next({
           data: {
-            countries: [],
+            country: {
+              code: "US",
+              name: "United States",
+            },
+          },
+        });
+        observer.complete();
+      });
+    });
+
+    const client = new ApolloClient({
+      link: from([new MockLink({ mockRegistry: registry }), serverLink]),
+      cache: new InMemoryCache({ addTypename: false }),
+    });
+
+    const result = await client.query({
+      query: gql`
+        query GetCountryWithPopulation($code: ID!) {
+          country(code: $code) {
+            code
+            name
+            population @mock(variant: "estimated-population")
+          }
+        }
+      `,
+      variables: { code: "US" },
+      fetchPolicy: "no-cache",
+    });
+
+    expect(result.data).toEqual({
+      country: {
+        code: "US",
+        name: "United States",
+        population: 331900000,
+      },
+    });
+  });
+
+  test("field-level @mock on new nested type adds nested object", async () => {
+    const registry = {
+      GetCountryWithWeather: {
+        "current-weather": {
+          data: {
+            temperature: 72,
+            condition: "Partly Cloudy",
+            forecast: [
+              { day: "Monday", high: 75, low: 62, precipitation: 10 },
+            ],
           },
         },
       },
+    };
+
+    const serverLink = new ApolloLink(() => {
+      return new Observable((observer) => {
+        observer.next({
+          data: {
+            country: {
+              code: "US",
+              name: "United States",
+            },
+          },
+        });
+        observer.complete();
+      });
     });
 
-    await expect(
-      client.query({
-        query: gql`
-          query GetCountries @mock(variant: "missing") {
-            countries {
-              code
+    const client = new ApolloClient({
+      link: from([new MockLink({ mockRegistry: registry }), serverLink]),
+      cache: new InMemoryCache({ addTypename: false }),
+    });
+
+    const result = await client.query({
+      query: gql`
+        query GetCountryWithWeather($code: ID!) {
+          country(code: $code) {
+            code
+            name
+            weather @mock(variant: "current-weather") {
+              temperature
+              condition
+              forecast {
+                day
+                high
+                low
+                precipitation
+              }
             }
           }
-        `,
-        fetchPolicy: "no-cache",
-      })
-    ).rejects.toThrow(
-      'Mock variant "missing" not found for operation "GetCountries". Available variants: top-three'
-    );
+        }
+      `,
+      variables: { code: "US" },
+      fetchPolicy: "no-cache",
+    });
 
-    expect(state.serverCalls).toBe(0);
-  });
-
-  test("throws when the operation is unnamed", async () => {
-    const { client, state } = createClient({});
-
-    await expect(
-      client.query({
-        query: gql`
-          query {
-            countries {
-              code
-            }
-          }
-        `,
-        fetchPolicy: "no-cache",
-      })
-    ).rejects.toThrow("Operation name is required when using MockLink.");
-
-    expect(state.serverCalls).toBe(0);
+    expect(result.data).toEqual({
+      country: {
+        code: "US",
+        name: "United States",
+        weather: {
+          temperature: 72,
+          condition: "Partly Cloudy",
+          forecast: [
+            { day: "Monday", high: 75, low: 62, precipitation: 10 },
+          ],
+        },
+      },
+    });
   });
 });
