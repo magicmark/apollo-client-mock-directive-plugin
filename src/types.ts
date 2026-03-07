@@ -1,10 +1,12 @@
+import type { FetchResult } from "@apollo/client";
+
 /**
  * Structure of a single mock variant within a mock file.
  */
 export interface MockVariant {
   data: unknown;
-  errors?: ReadonlyArray<Record<string, unknown>>;
-  extensions?: Record<string, unknown>;
+  errors?: FetchResult["errors"];
+  extensions?: FetchResult["extensions"];
   __description__?: string;
   __metadata__?: Record<string, unknown>;
   __appliesTo__?: string;

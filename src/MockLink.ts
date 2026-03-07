@@ -203,7 +203,7 @@ export class MockLink extends ApolloLink {
   private toFetchResult(mock: MockVariant): FetchResult {
     return {
       data: mock.data,
-      errors: mock.errors as FetchResult["errors"],
+      errors: mock.errors,
       extensions: mock.extensions,
     };
   }
@@ -218,8 +218,12 @@ export class MockLink extends ApolloLink {
     }
 
     const data = { ...(result.data as Record<string, unknown>) };
-    const errors = result.errors ? [...result.errors] : [];
-    const extensions = result.extensions ? { ...result.extensions } : {};
+    const errors: NonNullable<FetchResult["errors"]> = result.errors
+      ? [...result.errors]
+      : [];
+    const extensions: NonNullable<FetchResult["extensions"]> = result.extensions
+      ? { ...result.extensions }
+      : {};
 
     for (const fieldMock of fieldMocks) {
       const variant = this.getMockVariant(operationName, fieldMock.variant);
@@ -227,7 +231,7 @@ export class MockLink extends ApolloLink {
       this.setValueAtPath(data, fieldMock.path, variant.data);
 
       if (variant.errors) {
-        errors.push(...(variant.errors as FetchResult["errors"]));
+        errors.push(...variant.errors);
       }
 
       if (variant.extensions) {
