@@ -1,47 +1,46 @@
 import { ApolloLink, Observable } from "@apollo/client";
-import type { Operation, FetchResult } from "@apollo/client";
-import { visit, Kind } from "graphql";
+import type { FetchResult, NextLink, Operation } from "@apollo/client";
+import { Kind, visit } from "graphql";
 import type {
   DirectiveNode,
-  FieldNode,
-  OperationDefinitionNode,
   DocumentNode,
+  OperationDefinitionNode,
 } from "graphql";
-import type { MockDirectiveInfo, MockRegistry } from "./types";
+import type { MockDirectiveInfo, MockRegistry, MockVariant } from "./types";
 
 export interface MockLinkOptions {
   mockRegistry: MockRegistry;
 }
 
-/**
- * MockLink implements the @mock directive specification for Apollo Client.
- *
- * It intercepts GraphQL operations, detects @mock directives, strips mocked
- * fields from server requests, and merges mock data into responses.
- */
+interface ParsedMocks {
+  operationVariant: string | null;
+  fieldMocks: MockDirectiveInfo[];
+}
+
 export class MockLink extends ApolloLink {
-  private mockRegistry: MockRegistry;
+  private readonly mockRegistry: MockRegistry;
 
   constructor(options: MockLinkOptions) {
     super();
     this.mockRegistry = options.mockRegistry;
   }
 
-  request(operation: Operation, forward: any): Observable<FetchResult> {
-    const { query, operationName } = operation;
+  request(
+    operation: Operation,
+    forward?: NextLink
+  ): Observable<FetchResult> | null {
+    const operationName =
+      operation.operationName || this.getOperationName(operation.query);
+    const mocks = this.parseMocks(operation.query, operationName);
 
-    // Check if operation has any @mock directives
-    const mockInfo = this.extractMockDirectives(query);
-
-    // If operation-level mock exists, return fully mocked response
-    if (mockInfo.operationMock) {
+    if (mocks.operationVariant) {
       return new Observable((observer) => {
         try {
-          const response = this.getMockedOperationResponse(
-            operationName || "UnnamedOperation",
-            mockInfo.operationMock!.variant
+          observer.next(
+            this.toFetchResult(
+              this.getMockVariant(operationName, mocks.operationVariant)
+            )
           );
-          observer.next(response);
           observer.complete();
         } catch (error) {
           observer.error(error);
@@ -49,33 +48,26 @@ export class MockLink extends ApolloLink {
       });
     }
 
-    // If no field-level mocks, just forward
-    if (mockInfo.fieldMocks.length === 0) {
+    if (!forward) {
+      return null;
+    }
+
+    if (mocks.fieldMocks.length === 0) {
       return forward(operation);
     }
 
-    // Transform query to remove @mock directives
-    const transformedQuery = this.stripMockedFields(query, mockInfo.fieldMocks);
+    operation.query = this.stripMockedFields(operation.query);
 
-    // Update the operation's query
-    operation.query = transformedQuery;
-
-    // Forward operation and merge mock data into response
     return new Observable((observer) => {
       const subscription = forward(operation).subscribe({
-        next: (result: FetchResult) => {
+        next: (result) => {
           try {
-            const mergedResult = this.mergeMockData(
-              result,
-              operationName || "UnnamedOperation",
-              mockInfo.fieldMocks
-            );
-            observer.next(mergedResult);
+            observer.next(this.mergeFieldMocks(result, operationName, mocks.fieldMocks));
           } catch (error) {
             observer.error(error);
           }
         },
-        error: (error: any) => observer.error(error),
+        error: (error) => observer.error(error),
         complete: () => observer.complete(),
       });
 
@@ -83,230 +75,199 @@ export class MockLink extends ApolloLink {
     });
   }
 
-  /**
-   * Extract @mock directives from the operation
-   */
-  private extractMockDirectives(query: DocumentNode): {
-    operationMock: MockDirectiveInfo | null;
-    fieldMocks: MockDirectiveInfo[];
-  } {
-    let operationMock: MockDirectiveInfo | null = null;
+  private getOperationName(query: DocumentNode): string {
+    for (const definition of query.definitions) {
+      if (definition.kind === Kind.OPERATION_DEFINITION) {
+        return definition.name?.value || "UnnamedOperation";
+      }
+    }
+
+    return "UnnamedOperation";
+  }
+
+  private parseMocks(query: DocumentNode, targetOperationName: string): ParsedMocks {
+    let operationVariant: string | null = null;
     const fieldMocks: MockDirectiveInfo[] = [];
     const pathStack: string[] = [];
-    let currentTypeName = "";
-    let parentTypeName = "";
-    const getDirectiveArg = this.getDirectiveArgument.bind(this);
+    let inTargetOperation = false;
 
     visit(query, {
       OperationDefinition: {
-        enter(node: OperationDefinitionNode) {
-          currentTypeName = node.operation === "query" ? "Query" :
-                            node.operation === "mutation" ? "Mutation" :
-                            "Subscription";
-          parentTypeName = currentTypeName;
+        enter: (node: OperationDefinitionNode) => {
+          const isTargetOperation =
+            !node.name || node.name.value === targetOperationName;
 
-          // Check for operation-level @mock
-          const mockDirective = node.directives?.find(
-            (d) => d.name.value === "mock"
-          );
-
-          if (mockDirective) {
-            const variant = getDirectiveArg(mockDirective, "variant");
-            if (variant) {
-              operationMock = {
-                variant,
-                path: [],
-                fieldName: node.operation,
-                schemaCoordinate: currentTypeName,
-              };
-            }
+          if (!isTargetOperation) {
+            return false;
           }
+
+          inTargetOperation = true;
+          operationVariant = this.getDirectiveArgument(node.directives, "variant");
+
+          if (!operationVariant) {
+            operationVariant = this.getDirectiveArgument(node.directives, "name");
+          }
+
+          return undefined;
         },
-        leave() {
-          currentTypeName = "";
-          parentTypeName = "";
+        leave: () => {
+          inTargetOperation = false;
+          pathStack.length = 0;
         },
       },
       Field: {
-        enter(node: FieldNode) {
-          const fieldName = node.name.value;
-          pathStack.push(fieldName);
-
-          // Check for field-level @mock
-          const mockDirective = node.directives?.find(
-            (d) => d.name.value === "mock"
-          );
-
-          if (mockDirective && !operationMock) {
-            const variant = getDirectiveArg(mockDirective, "variant");
-            if (variant) {
-              // Use parent type name for schema coordinate
-              const schemaCoordinate = `${parentTypeName}.${fieldName}`;
-
-              fieldMocks.push({
-                variant,
-                path: [...pathStack],
-                fieldName,
-                schemaCoordinate,
-              });
-            }
+        enter: (node) => {
+          if (!inTargetOperation) {
+            return;
           }
+
+          const responseFieldName = node.alias?.value || node.name.value;
+          pathStack.push(responseFieldName);
+
+          if (operationVariant) {
+            return;
+          }
+
+          let variant = this.getDirectiveArgument(node.directives, "variant");
+          if (!variant) {
+            variant = this.getDirectiveArgument(node.directives, "name");
+          }
+
+          if (!variant) {
+            return;
+          }
+
+          fieldMocks.push({
+            variant,
+            path: [...pathStack],
+          });
         },
-        leave() {
-          pathStack.pop();
+        leave: () => {
+          if (inTargetOperation) {
+            pathStack.pop();
+          }
         },
       },
     });
 
-    return { operationMock, fieldMocks };
+    return { operationVariant, fieldMocks };
   }
 
-  /**
-   * Get the value of a directive argument
-   */
-  private getDirectiveArgument(directive: DirectiveNode, argName: string): string | null {
-    const arg = directive.arguments?.find((a) => a.name.value === argName);
-    if (arg && arg.value.kind === Kind.STRING) {
-      return arg.value.value;
+  private getDirectiveArgument(
+    directives: ReadonlyArray<DirectiveNode> | undefined,
+    name: string
+  ): string | null {
+    const directive = directives?.find((item) => item.name.value === "mock");
+    const argument = directive?.arguments?.find((item) => item.name.value === name);
+
+    if (!argument || argument.value.kind !== Kind.STRING) {
+      return null;
     }
-    return null;
+
+    return argument.value.value;
   }
 
-  /**
-   * Strip @mock directives and mocked fields from query
-   *
-   * Per the spec: "the client must transform the document to remove any
-   * selections which have `@mock` applied before sending the request to the server"
-   *
-   * This implementation removes both the directive and the entire field selection.
-   */
-  private stripMockedFields(
-    query: DocumentNode,
-    _fieldMocks: MockDirectiveInfo[]
-  ): DocumentNode {
-    const transformedQuery = visit(query, {
+  private stripMockedFields(query: DocumentNode): DocumentNode {
+    return visit(query, {
       Field(node) {
-        // Remove fields that have @mock directives
-        const hasMockDirective = node.directives?.some(
-          (d) => d.name.value === "mock"
-        );
-        if (hasMockDirective) {
+        if (node.directives?.some((directive) => directive.name.value === "mock")) {
           return null;
         }
       },
     });
-
-    return transformedQuery;
   }
 
-  /**
-   * Get fully mocked operation response
-   */
-  private getMockedOperationResponse(
-    operationName: string,
-    variant: string
-  ): FetchResult {
+  private getMockVariant(operationName: string, variantName: string): MockVariant {
     const mockFile = this.mockRegistry[operationName];
 
     if (!mockFile) {
       throw new Error(
         `No mock file found for operation "${operationName}". ` +
-        `Expected a mock file at __graphql_mocks__/${operationName}.json`
+          `Expected __graphql_mocks__/${operationName}.json`
       );
     }
 
-    const mockVariant = mockFile[variant];
+    const variant = mockFile[variantName];
 
-    if (!mockVariant) {
-      const availableVariants = Object.keys(mockFile).filter(k => !k.startsWith("__"));
+    if (!variant) {
+      const availableVariants = Object.keys(mockFile).join(", ") || "(none)";
       throw new Error(
-        `Mock variant "${variant}" not found for operation "${operationName}". ` +
-        `Available variants: ${availableVariants.join(", ")}`
+        `Mock variant "${variantName}" not found for operation "${operationName}". ` +
+          `Available variants: ${availableVariants}`
       );
     }
 
+    return variant;
+  }
+
+  private toFetchResult(mock: MockVariant): FetchResult {
     return {
-      data: mockVariant.data,
-      errors: mockVariant.errors,
-      extensions: mockVariant.extensions,
+      data: mock.data,
+      errors: mock.errors as FetchResult["errors"],
+      extensions: mock.extensions,
     };
   }
 
-  /**
-   * Merge mock data into server response
-   */
-  private mergeMockData(
+  private mergeFieldMocks(
     result: FetchResult,
     operationName: string,
     fieldMocks: MockDirectiveInfo[]
   ): FetchResult {
-    if (!result.data || fieldMocks.length === 0) {
+    if (!result.data || typeof result.data !== "object") {
       return result;
     }
 
-    const mockFile = this.mockRegistry[operationName];
+    const data = { ...(result.data as Record<string, unknown>) };
+    const errors = result.errors ? [...result.errors] : [];
+    const extensions = result.extensions ? { ...result.extensions } : {};
 
-    if (!mockFile) {
-      console.warn(
-        `No mock file found for operation "${operationName}". ` +
-        `Expected a mock file at __graphql_mocks__/${operationName}.json`
-      );
-      return result;
-    }
+    for (const fieldMock of fieldMocks) {
+      const variant = this.getMockVariant(operationName, fieldMock.variant);
 
-    const mergedData = { ...result.data };
-    const mergedErrors = result.errors ? [...result.errors] : [];
-    const mergedExtensions = result.extensions ? { ...result.extensions } : {};
+      this.setValueAtPath(data, fieldMock.path, variant.data);
 
-    // Apply each mock
-    for (const mockInfo of fieldMocks) {
-      const mockVariant = mockFile[mockInfo.variant];
-
-      if (!mockVariant) {
-        const availableVariants = Object.keys(mockFile).filter(k => !k.startsWith("__"));
-        throw new Error(
-          `Mock variant "${mockInfo.variant}" not found for operation "${operationName}". ` +
-          `Available variants: ${availableVariants.join(", ")}`
-        );
+      if (variant.errors) {
+        errors.push(...(variant.errors as FetchResult["errors"]));
       }
 
-      // Merge data at the field's path
-      this.setValueAtPath(mergedData, mockInfo.path, mockVariant.data);
-
-      // Merge errors if present
-      if (mockVariant.errors) {
-        mergedErrors.push(...mockVariant.errors);
-      }
-
-      // Merge extensions if present
-      if (mockVariant.extensions) {
-        Object.assign(mergedExtensions, mockVariant.extensions);
+      if (variant.extensions) {
+        Object.assign(extensions, variant.extensions);
       }
     }
 
     return {
-      data: mergedData,
-      errors: mergedErrors.length > 0 ? mergedErrors : undefined,
-      extensions: Object.keys(mergedExtensions).length > 0 ? mergedExtensions : undefined,
+      ...result,
+      data,
+      errors: errors.length > 0 ? errors : undefined,
+      extensions: Object.keys(extensions).length > 0 ? extensions : undefined,
     };
   }
 
-  /**
-   * Set a value at a nested path in an object
-   */
-  private setValueAtPath(obj: any, path: string[], value: any): void {
-    if (path.length === 0) return;
-
-    let current = obj;
-    for (let i = 0; i < path.length - 1; i++) {
-      const key = path[i];
-      if (!current[key]) {
-        current[key] = {};
-      }
-      current = current[key];
+  private setValueAtPath(
+    root: Record<string, unknown>,
+    path: string[],
+    value: unknown
+  ): void {
+    if (path.length === 0) {
+      return;
     }
 
-    const lastKey = path[path.length - 1];
-    current[lastKey] = value;
+    let current: Record<string, unknown> = root;
+
+    for (let index = 0; index < path.length - 1; index += 1) {
+      const segment = path[index];
+      const existing = current[segment];
+
+      if (existing && typeof existing === "object" && !Array.isArray(existing)) {
+        current = existing as Record<string, unknown>;
+        continue;
+      }
+
+      const next: Record<string, unknown> = {};
+      current[segment] = next;
+      current = next;
+    }
+
+    current[path[path.length - 1]] = value;
   }
 }

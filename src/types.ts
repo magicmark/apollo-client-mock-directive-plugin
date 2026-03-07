@@ -2,12 +2,12 @@
  * Structure of a single mock variant within a mock file.
  */
 export interface MockVariant {
-  data: any;
-  errors?: any[];
-  extensions?: Record<string, any>;
-  __appliesTo__: string;
+  data: unknown;
+  errors?: ReadonlyArray<Record<string, unknown>>;
+  extensions?: Record<string, unknown>;
   __description__?: string;
-  __metadata__?: Record<string, any>;
+  __metadata__?: Record<string, unknown>;
+  __appliesTo__?: string;
 }
 
 /**
@@ -28,6 +28,4 @@ export interface MockRegistry {
 export interface MockDirectiveInfo {
   variant: string;
   path: string[];
-  fieldName: string;
-  schemaCoordinate: string;
 }
