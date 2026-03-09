@@ -224,7 +224,113 @@ describe("field-level @mock on new field", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test 4: Field-level mock on a nested type that doesn't exist in the schema
+// Test 4: Inline value mock — scalar fields mocked directly in the query
+// ---------------------------------------------------------------------------
+describe("field-level @mock with inline value", () => {
+  test("mocks scalar fields using inline value without a mock file", async () => {
+    const registry: MockRegistry = {};
+
+    const query = gql`
+      query GetCountryInline($code: ID!) {
+        country(code: $code) {
+          code
+          name
+          capital @mock(value: "Wakanda City")
+          population @mock(value: "331900000")
+          isLandlocked @mock(value: "false")
+        }
+      }
+    `;
+
+    const client = createClient(registry, {
+      data: {
+        country: {
+          code: "US",
+          name: "United States",
+        },
+      },
+    });
+
+    render(
+      <ApolloProvider client={client}>
+        <QueryRenderer query={query} variables={{ code: "US" }} />
+      </ApolloProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("result")).toBeTruthy();
+    });
+
+    const result = JSON.parse(screen.getByTestId("result").textContent!);
+    // Inline mocked fields with coercion
+    expect(result.country.capital).toBe("Wakanda City");
+    expect(result.country.population).toBe(331900000);
+    expect(result.country.isLandlocked).toBe(false);
+    // Real fields from server
+    expect(result.country.code).toBe("US");
+    expect(result.country.name).toBe("United States");
+  });
+
+  test("mixes inline value and variant mocks in the same query", async () => {
+    const registry: MockRegistry = {
+      GetCountryMixed: {
+        "current-weather": {
+          data: {
+            temperature: 72,
+            condition: "Sunny",
+          },
+          __appliesTo__: "Country.weather",
+        },
+      },
+    };
+
+    const query = gql`
+      query GetCountryMixed($code: ID!) {
+        country(code: $code) {
+          code
+          name
+          capital @mock(value: "Nairobi")
+          weather @mock(variant: "current-weather") {
+            temperature
+            condition
+          }
+        }
+      }
+    `;
+
+    const client = createClient(registry, {
+      data: {
+        country: {
+          code: "KE",
+          name: "Kenya",
+        },
+      },
+    });
+
+    render(
+      <ApolloProvider client={client}>
+        <QueryRenderer query={query} variables={{ code: "KE" }} />
+      </ApolloProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("result")).toBeTruthy();
+    });
+
+    const result = JSON.parse(screen.getByTestId("result").textContent!);
+    // Inline value mock
+    expect(result.country.capital).toBe("Nairobi");
+    // Variant mock
+    expect(result.country.weather.temperature).toBe(72);
+    expect(result.country.weather.condition).toBe("Sunny");
+    // Real fields
+    expect(result.country.code).toBe("KE");
+    expect(result.country.name).toBe("Kenya");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 5: Field-level mock on a nested type that doesn't exist in the schema
 // ---------------------------------------------------------------------------
 describe("field-level @mock on new nested type", () => {
   test("mocks a complex nested field not yet in the server schema", async () => {

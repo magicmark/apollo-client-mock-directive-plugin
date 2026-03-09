@@ -27,6 +27,7 @@ export interface MockRegistry {
  */
 export interface MockDirectiveInfo {
   variant: string;
+  value?: string;
   path: string[];
   fieldName: string;
   schemaCoordinate: string;

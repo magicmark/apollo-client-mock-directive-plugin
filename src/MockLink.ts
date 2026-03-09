@@ -139,12 +139,22 @@ export class MockLink extends ApolloLink {
 
           if (mockDirective && !operationMock) {
             const variant = getDirectiveArg(mockDirective, "variant");
-            if (variant) {
+            const value = getDirectiveArg(mockDirective, "value");
+
+            if (variant && value) {
+              throw new Error(
+                `@mock on field "${fieldName}" has both "variant" and "value" arguments. ` +
+                `These are mutually exclusive — provide one or the other.`
+              );
+            }
+
+            if (variant || value) {
               // Use parent type name for schema coordinate
               const schemaCoordinate = `${parentTypeName}.${fieldName}`;
 
               fieldMocks.push({
-                variant,
+                variant: variant || "",
+                ...(value != null ? { value } : {}),
                 path: [...pathStack],
                 fieldName,
                 schemaCoordinate,
@@ -246,20 +256,25 @@ export class MockLink extends ApolloLink {
 
     const mockFile = this.mockRegistry[operationName];
 
-    if (!mockFile) {
-      console.warn(
-        `No mock file found for operation "${operationName}". ` +
-        `Expected a mock file at __graphql_mocks__/${operationName}.json`
-      );
-      return result;
-    }
-
     const mergedData = { ...result.data };
     const mergedErrors = result.errors ? [...result.errors] : [];
     const mergedExtensions = result.extensions ? { ...result.extensions } : {};
 
     // Apply each mock
     for (const mockInfo of fieldMocks) {
+      // Inline value: use directly without consulting mock file
+      if (mockInfo.value != null) {
+        this.setValueAtPath(mergedData, mockInfo.path, this.coerceValue(mockInfo.value));
+        continue;
+      }
+
+      if (!mockFile) {
+        throw new Error(
+          `No mock file found for operation "${operationName}". ` +
+          `Expected a mock file at __graphql_mocks__/${operationName}.json`
+        );
+      }
+
       const mockVariant = mockFile[mockInfo.variant];
 
       if (!mockVariant) {
@@ -289,6 +304,18 @@ export class MockLink extends ApolloLink {
       errors: mergedErrors.length > 0 ? mergedErrors : undefined,
       extensions: Object.keys(mergedExtensions).length > 0 ? mergedExtensions : undefined,
     };
+  }
+
+  /**
+   * Coerce a string value to its appropriate scalar type.
+   */
+  private coerceValue(value: string): string | number | boolean | null {
+    if (value === "null") return null;
+    if (value === "true") return true;
+    if (value === "false") return false;
+    const num = Number(value);
+    if (!isNaN(num) && value.trim() !== "") return num;
+    return value;
   }
 
   /**
