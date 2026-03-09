@@ -292,7 +292,12 @@ export class MockLink extends ApolloLink {
   }
 
   /**
-   * Set a value at a nested path in an object
+   * Set a value at a nested path in an object.
+   *
+   * When an intermediate value in the path is an array (i.e. the server returned
+   * a list), the remaining path is applied to every element in the array. This
+   * implements the spec requirement that @mock inside a list's selection set
+   * applies the same mock value uniformly to every list item.
    */
   private setValueAtPath(obj: any, path: string[], value: any): void {
     if (path.length === 0) return;
@@ -304,6 +309,17 @@ export class MockLink extends ApolloLink {
         current[key] = {};
       }
       current = current[key];
+
+      // If the current value is an array, apply the remaining path to each element
+      if (Array.isArray(current)) {
+        const remainingPath = path.slice(i + 1);
+        for (const item of current) {
+          if (item != null) {
+            this.setValueAtPath(item, remainingPath, value);
+          }
+        }
+        return;
+      }
     }
 
     const lastKey = path[path.length - 1];
