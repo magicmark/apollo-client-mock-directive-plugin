@@ -119,10 +119,17 @@ var MockLink = class extends import_client.ApolloLink {
           );
           if (mockDirective && !operationMock) {
             const variant = getDirectiveArg(mockDirective, "variant");
-            if (variant) {
+            const value = getDirectiveArg(mockDirective, "value");
+            if (variant && value) {
+              throw new Error(
+                `@mock on field "${fieldName}" has both "variant" and "value" arguments. These are mutually exclusive \u2014 provide one or the other.`
+              );
+            }
+            if (variant || value) {
               const schemaCoordinate = `${parentTypeName}.${fieldName}`;
               fieldMocks.push({
-                variant,
+                variant: variant || "",
+                ...value != null ? { value } : {},
                 path: [...pathStack],
                 fieldName,
                 schemaCoordinate
@@ -199,16 +206,19 @@ var MockLink = class extends import_client.ApolloLink {
       return result;
     }
     const mockFile = this.mockRegistry[operationName];
-    if (!mockFile) {
-      console.warn(
-        `No mock file found for operation "${operationName}". Expected a mock file at __graphql_mocks__/${operationName}.json`
-      );
-      return result;
-    }
     const mergedData = { ...result.data };
     const mergedErrors = result.errors ? [...result.errors] : [];
     const mergedExtensions = result.extensions ? { ...result.extensions } : {};
     for (const mockInfo of fieldMocks) {
+      if (mockInfo.value != null) {
+        this.setValueAtPath(mergedData, mockInfo.path, this.coerceValue(mockInfo.value));
+        continue;
+      }
+      if (!mockFile) {
+        throw new Error(
+          `No mock file found for operation "${operationName}". Expected a mock file at __graphql_mocks__/${operationName}.json`
+        );
+      }
       const mockVariant = mockFile[mockInfo.variant];
       if (!mockVariant) {
         const availableVariants = Object.keys(mockFile).filter((k) => !k.startsWith("__"));
@@ -229,6 +239,17 @@ var MockLink = class extends import_client.ApolloLink {
       errors: mergedErrors.length > 0 ? mergedErrors : void 0,
       extensions: Object.keys(mergedExtensions).length > 0 ? mergedExtensions : void 0
     };
+  }
+  /**
+   * Coerce a string value to its appropriate scalar type.
+   */
+  coerceValue(value) {
+    if (value === "null") return null;
+    if (value === "true") return true;
+    if (value === "false") return false;
+    const num = Number(value);
+    if (!isNaN(num) && value.trim() !== "") return num;
+    return value;
   }
   /**
    * Set a value at a nested path in an object
