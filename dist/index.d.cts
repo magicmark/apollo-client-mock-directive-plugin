@@ -26,6 +26,7 @@ interface MockRegistry {
  */
 interface MockDirectiveInfo {
     variant: string;
+    value?: string;
     path: string[];
     fieldName: string;
     schemaCoordinate: string;
@@ -69,6 +70,10 @@ declare class MockLink extends ApolloLink {
      * Merge mock data into server response
      */
     private mergeMockData;
+    /**
+     * Coerce a string value to its appropriate scalar type.
+     */
+    private coerceValue;
     /**
      * Set a value at a nested path in an object
      */
