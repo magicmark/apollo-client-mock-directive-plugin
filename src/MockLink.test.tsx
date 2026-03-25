@@ -79,7 +79,7 @@ describe("operation-level @mock", () => {
               { code: "JP", name: "Japan" },
             ],
           },
-          __appliesTo__: "Query",
+          __path__: "Query",
         },
       },
     };
@@ -124,7 +124,7 @@ describe("field-level @mock on existing field", () => {
       GetCountry: {
         "fictional-capital": {
           data: "Wakanda City",
-          __appliesTo__: "Country.capital",
+          __path__: "country.capital",
         },
       },
     };
@@ -180,7 +180,7 @@ describe("field-level @mock on new field", () => {
       GetCountryWithPopulation: {
         "estimated-population": {
           data: 331900000,
-          __appliesTo__: "Country.population",
+          __path__: "country.population",
         },
       },
     };
@@ -279,7 +279,7 @@ describe("field-level @mock with inline value", () => {
             temperature: 72,
             condition: "Sunny",
           },
-          __appliesTo__: "Country.weather",
+          __path__: "country.weather",
         },
       },
     };
@@ -344,7 +344,7 @@ describe("field-level @mock on new nested type", () => {
               { day: "Monday", high: 75, low: 62, precipitation: 10 },
             ],
           },
-          __appliesTo__: "Country.weather",
+          __path__: "country.weather",
         },
       },
     };

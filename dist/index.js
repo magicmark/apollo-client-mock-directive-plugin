@@ -74,7 +74,7 @@ var MockLink = class extends ApolloLink {
                 variant,
                 path: [],
                 fieldName: node.operation,
-                schemaCoordinate: currentTypeName
+                fieldPath: currentTypeName
               };
             }
           }
@@ -100,13 +100,13 @@ var MockLink = class extends ApolloLink {
               );
             }
             if (variant || value) {
-              const schemaCoordinate = `${parentTypeName}.${fieldName}`;
+              const fieldPath = pathStack.join(".");
               fieldMocks.push({
                 variant: variant || "",
                 ...value != null ? { value } : {},
                 path: [...pathStack],
                 fieldName,
-                schemaCoordinate
+                fieldPath
               });
             }
           }
