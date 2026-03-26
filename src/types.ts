@@ -5,7 +5,7 @@ export interface MockVariant {
   data: any;
   errors?: any[];
   extensions?: Record<string, any>;
-  __appliesTo__: string;
+  __path__: string;
   __description__?: string;
   __metadata__?: Record<string, any>;
 }
@@ -30,5 +30,5 @@ export interface MockDirectiveInfo {
   value?: string;
   path: string[];
   fieldName: string;
-  schemaCoordinate: string;
+  fieldPath: string;
 }
