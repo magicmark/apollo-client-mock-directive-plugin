@@ -30,6 +30,7 @@ interface MockDirectiveInfo {
     path: string[];
     fieldName: string;
     fieldPath: string;
+    mockFileName: string;
 }
 
 interface MockLinkOptions {
@@ -46,23 +47,6 @@ declare class MockLink extends ApolloLink {
     constructor(options: MockLinkOptions);
     request(operation: Operation, forward: any): Observable<FetchResult>;
     /**
-     * Extract @mock directives from the operation
-     */
-    private extractMockDirectives;
-    /**
-     * Get the value of a directive argument
-     */
-    private getDirectiveArgument;
-    /**
-     * Strip @mock directives and mocked fields from query
-     *
-     * Per the spec: "the client must transform the document to remove any
-     * selections which have `@mock` applied before sending the request to the server"
-     *
-     * This implementation removes both the directive and the entire field selection.
-     */
-    private stripMockedFields;
-    /**
      * Get fully mocked operation response
      */
     private getMockedOperationResponse;
@@ -70,10 +54,8 @@ declare class MockLink extends ApolloLink {
      * Merge mock data into server response
      */
     private mergeMockData;
-    /**
-     * Coerce a string value to its appropriate scalar type.
-     */
-    private coerceValue;
+    private assertMockVariant;
+    private cloneValue;
     /**
      * Set a value at a nested path in an object
      */
