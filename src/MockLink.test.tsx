@@ -169,6 +169,96 @@ describe("field-level @mock on existing field", () => {
     expect(result.country.code).toBe("US");
     expect(result.country.name).toBe("United States");
   });
+
+  test("uses aliases when calculating mock paths and response keys", async () => {
+    const registry: MockRegistry = {
+      GetCountryAlias: {
+        "fictional-capital": {
+          data: "Wakanda City",
+          __path__: "country.home",
+        },
+      },
+    };
+
+    const query = gql`
+      query GetCountryAlias($code: ID!) {
+        country(code: $code) {
+          code
+          home: capital @mock(variant: "fictional-capital")
+        }
+      }
+    `;
+
+    const client = createClient(registry, {
+      data: {
+        country: {
+          __typename: "Country",
+          code: "US",
+        },
+      },
+    });
+
+    render(
+      <ApolloProvider client={client}>
+        <QueryRenderer query={query} variables={{ code: "US" }} />
+      </ApolloProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("result")).toBeTruthy();
+    });
+
+    const result = JSON.parse(screen.getByTestId("result").textContent!);
+    expect(result.country.home).toBe("Wakanda City");
+    expect(result.country.capital).toBeUndefined();
+  });
+
+  test("reads variant mocks from fragment mock files", async () => {
+    const registry: MockRegistry = {
+      CountryCapitalFields: {
+        "fictional-capital": {
+          data: "Wakanda City",
+          __path__: "capital",
+        },
+      },
+    };
+
+    const query = gql`
+      query GetCountryWithFragment($code: ID!) {
+        country(code: $code) {
+          __typename
+          code
+          ...CountryCapitalFields
+        }
+      }
+
+      fragment CountryCapitalFields on Country {
+        capital @mock(variant: "fictional-capital")
+      }
+    `;
+
+    const client = createClient(registry, {
+      data: {
+        country: {
+          __typename: "Country",
+          code: "US",
+        },
+      },
+    });
+
+    render(
+      <ApolloProvider client={client}>
+        <QueryRenderer query={query} variables={{ code: "US" }} />
+      </ApolloProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("result")).toBeTruthy();
+    });
+
+    const result = JSON.parse(screen.getByTestId("result").textContent!);
+    expect(result.country.capital).toBe("Wakanda City");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -326,6 +416,45 @@ describe("field-level @mock with inline value", () => {
     // Real fields
     expect(result.country.code).toBe("KE");
     expect(result.country.name).toBe("Kenya");
+  });
+
+  test("applies nested inline mocks to each item in a list response", async () => {
+    const registry: MockRegistry = {};
+
+    const query = gql`
+      query GetCountriesInline {
+        countries {
+          code
+          name
+          capital @mock(value: "Hidden Capital")
+        }
+      }
+    `;
+
+    const client = createClient(registry, {
+      data: {
+        countries: [
+          { code: "US", name: "United States" },
+          { code: "GB", name: "United Kingdom" },
+        ],
+      },
+    });
+
+    render(
+      <ApolloProvider client={client}>
+        <QueryRenderer query={query} />
+      </ApolloProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("result")).toBeTruthy();
+    });
+
+    const result = JSON.parse(screen.getByTestId("result").textContent!);
+    expect(result.countries).toEqual([
+      { code: "US", name: "United States", capital: "Hidden Capital" },
+      { code: "GB", name: "United Kingdom", capital: "Hidden Capital" },
+    ]);
   });
 });
 

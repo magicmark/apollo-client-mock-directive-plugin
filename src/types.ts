@@ -31,4 +31,5 @@ export interface MockDirectiveInfo {
   path: string[];
   fieldName: string;
   fieldPath: string;
+  mockFileName: string;
 }
